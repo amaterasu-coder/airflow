@@ -34,6 +34,7 @@ DELIMITER = '.csv'
 PREFIX = 'TEST'
 S3_BUCKET = 's3://bucket/'
 MOCK_FILES = ["TEST1.csv", "TEST2.csv", "TEST3.csv"]
+ACL_POLICY = "private-read"
 
 
 class TestGCSToS3Operator(unittest.TestCase):
@@ -189,3 +190,34 @@ class TestGCSToS3Operator(unittest.TestCase):
         uploaded_files = operator.execute(None)
         self.assertEqual(sorted(MOCK_FILES), sorted(uploaded_files))
         self.assertEqual(sorted(MOCK_FILES), sorted(hook.list_keys('bucket', delimiter='/')))
+
+    # Test6: Acl_policy parameter is set
+    @mock_s3
+    @mock.patch('airflow.providers.google.cloud.operators.gcs.GCSHook')
+    @mock.patch('airflow.providers.amazon.aws.transfers.gcs_to_s3.GCSHook')
+    @mock.patch('airflow.providers.amazon.aws.hooks.s3.S3Hook.load_bytes')
+    def test_execute_with_acl_policy(self, mock_load_bytes, mock_gcs_hook, mock_gcs_hook2):
+        mock_gcs_hook.return_value.list.return_value = MOCK_FILES
+        mock_gcs_hook.return_value.download.return_value = b"testing"
+        mock_gcs_hook2.return_value.list.return_value = MOCK_FILES
+
+        operator = GCSToS3Operator(
+            task_id=TASK_ID,
+            bucket=GCS_BUCKET,
+            prefix=PREFIX,
+            delimiter=DELIMITER,
+            dest_aws_conn_id="aws_default",
+            dest_s3_key=S3_BUCKET,
+            replace=False,
+            acl_policy=ACL_POLICY,
+        )
+
+        # Create dest bucket without files
+        hook = S3Hook(aws_conn_id='airflow_gcs_test')
+        bucket = hook.get_bucket('bucket')
+        bucket.create()
+
+        operator.execute(None)
+
+        # Make sure the acl_policy parameter is passed to the upload method
+        self.assertEqual(mock_load_bytes.call_args.kwargs['acl_policy'], ACL_POLICY)
